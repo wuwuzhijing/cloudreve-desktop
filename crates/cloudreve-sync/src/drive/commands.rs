@@ -250,7 +250,7 @@ impl Mount {
         const BUFFER_SIZE: usize = 65536;
 
         // Create HTTP client and make a single range request
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
         let range_header = format!("bytes={}-{}", range.start, range.end - 1);
 
         let response = client

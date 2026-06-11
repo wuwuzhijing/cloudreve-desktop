@@ -152,7 +152,9 @@ impl Client {
     /// Create a new API client
     pub fn new(config: ClientConfig) -> Self {
         let mut builder = HttpClient::builder()
-            .connect_timeout(std::time::Duration::from_secs(config.timeout_seconds));
+            .connect_timeout(std::time::Duration::from_secs(config.timeout_seconds))
+            .danger_accept_invalid_certs(true);
+        eprintln!("DEBUG: cloudreve-api Client::new called, accept invalid certs enabled");
 
         if let Some(ref user_agent) = config.user_agent {
             builder = builder.user_agent(user_agent);

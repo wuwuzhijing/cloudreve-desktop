@@ -240,6 +240,135 @@ fn setup_tray(app: &tauri::App) -> anyhow::Result<()> {
     Ok(())
 }
 
+use std::collections::HashMap;
+
+#[derive(serde::Serialize)]
+struct InsecureHttpResponse {
+    status: u16,
+    body: String,
+}
+
+#[tauri::command]
+async fn insecure_http_text(
+    method: String,
+    url: String,
+    headers: Option<HashMap<String, String>>,
+    body: Option<String>,
+) -> Result<InsecureHttpResponse, String> {
+    eprintln!("========== ENTER insecure_http_text ==========");
+    eprintln!("method = {}", method);
+    eprintln!("url = {}", url);
+
+    let method = reqwest::Method::from_bytes(method.as_bytes())
+        .map_err(|e| format!("invalid method: {:#?}", e))?;
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("build reqwest client failed: {:#?}", e))?;
+
+    let mut request = client.request(method, &url);
+
+    if let Some(headers) = headers {
+        for (k, v) in headers {
+            request = request.header(k, v);
+        }
+    }
+
+    if let Some(body) = body {
+        request = request.body(body);
+    }
+
+    let response = request.send().await.map_err(|e| {
+        let mut msg = format!(
+            "request failed\nURL: {}\nDisplay: {}\nDebug: {:#?}",
+            url, e, e
+        );
+
+        let mut source = std::error::Error::source(&e);
+        let mut idx = 0;
+
+        while let Some(s) = source {
+            msg.push_str(&format!("\nCaused by [{}]: {}", idx, s));
+            source = s.source();
+            idx += 1;
+        }
+
+        eprintln!("{}", msg);
+        msg
+    })?;
+
+    let status = response.status().as_u16();
+
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("read response body failed: {:#?}", e))?;
+
+    eprintln!("response status = {}", status);
+    eprintln!("response body = {}", body);
+
+    Ok(InsecureHttpResponse { status, body })
+}
+
+#[tauri::command]
+async fn validate_site_ping_insecure(site_url: String) -> Result<String, String> {
+    eprintln!("========== ENTER validate_site_ping_insecure ==========");
+    eprintln!("site_url = {}", site_url);
+
+    let site_url = site_url.trim().trim_end_matches('/');
+
+    if !site_url.starts_with("http://") && !site_url.starts_with("https://") {
+        return Err(format!("invalid site url: {}", site_url));
+    }
+
+    let url = format!("{}/api/v4/site/ping", site_url);
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(20))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("build reqwest client failed: {:#?}", e))?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| {
+            let mut msg = format!(
+                "request failed\nURL: {}\nDisplay: {}\nDebug: {:#?}",
+                url, e, e
+            );
+
+            let mut source = std::error::Error::source(&e);
+            let mut idx = 0;
+
+            while let Some(s) = source {
+                msg.push_str(&format!("\nCaused by [{}]: {}", idx, s));
+                source = s.source();
+                idx += 1;
+            }
+
+            msg
+        })?;
+
+    let status = response.status();
+
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("read response body failed: {:#?}", e))?;
+
+    if !status.is_success() {
+        return Err(format!("http status error: {}\nbody: {}", status, body));
+    }
+
+    Ok(body)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize config manager first so i18n can read language setting
@@ -293,6 +422,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            insecure_http_text,
+            validate_site_ping_insecure,
             commands::is_dir_empty,
             commands::list_drives,
             commands::add_drive,

@@ -404,9 +404,17 @@ impl Mount {
             sync_root_info.set_display_name(config.name.clone());
             sync_root_info.set_hydration_type(HydrationType::Full);
             sync_root_info.set_population_type(PopulationType::Full);
-            if let Some(icon_path) = config.icon_path.as_ref() {
-                sync_root_info.set_icon(format!("{},0", icon_path));
-            }
+            let icon_resource = match config.icon_path.as_ref() {
+                Some(icon_path) if !icon_path.trim().is_empty() => {
+                    format!("{},0", icon_path)
+                }
+                _ => {
+                    r"C:\Windows\System32\imageres.dll,-3".to_string()
+                }
+            };
+
+            sync_root_info.set_icon(icon_resource);
+
             sync_root_info.set_version("1.0.0");
             sync_root_info
                 .set_recycle_bin_uri(recycle_bin_url(&config).unwrap_or_else(|_| "https://cloudreve.org".to_string()))

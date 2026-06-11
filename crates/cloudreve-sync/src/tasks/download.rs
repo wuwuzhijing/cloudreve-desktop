@@ -408,7 +408,7 @@ impl<'a> DownloadTask<'a> {
         tracker: Arc<DownloadProgressTracker>,
         reporter: &InMemoryDownloadProgressReporter,
     ) -> Result<()> {
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
         let response = client
             .get(url)
             .send()

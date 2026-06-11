@@ -1,5 +1,6 @@
-import { fetch } from "./fetch";
 import { CALLBACK_PATH, CLIENT_ID, CLIENT_SECRET } from "./constants";
+import { invoke } from "@tauri-apps/api/core";
+import { insecureHttpJson } from "./insecureHttp";
 
 export const MIN_VERSION = "4.12.0";
 
@@ -74,84 +75,80 @@ export async function exchangeTokens(
     code_verifier: pkceVerifier,
   });
 
-  let response: Response;
+  let data: TokenResponse | TokenErrorResponse;
+
   try {
-    response = await fetch(url.toString(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: body.toString(),
-    });
+    data = await insecureHttpJson<TokenResponse | TokenErrorResponse>(
+      url.toString(),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      }
+    );
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    throw { type: "connectionFailed", params: { message } } as ValidationError;
-  }
 
-  const data = await response.json();
-
-  if (!response.ok) {
-    const errorData = data as TokenErrorResponse;
     throw {
-      type: "apiError",
-      params: {
-        message: errorData.error_description || errorData.error || "Token exchange failed",
-      },
+      type: "connectionFailed",
+      params: { message },
     } as ValidationError;
   }
 
   if (!("access_token" in data)) {
+    const errorData = data as TokenErrorResponse;
+
     throw {
       type: "apiError",
-      params: { message: "Invalid token response from server: " + JSON.stringify(data) },
+      params: {
+        message:
+          errorData.error_description ||
+          errorData.error ||
+          "Token exchange failed: " + JSON.stringify(data),
+      },
     } as ValidationError;
   }
 
   return data as TokenResponse;
 }
 
-/**
- * Validate site version by pinging the API endpoint
- * @param siteUrl - The base URL of the Cloudreve site
- * @returns The version string if valid, throws a ValidationError otherwise
- */
 export async function validateSiteVersion(siteUrl: string): Promise<string> {
-  let response: Response;
   try {
-    const url = new URL("/api/v4/site/ping", siteUrl);
-    response = await fetch(url.toString());
+    console.log("call validate_site_ping_insecure:", siteUrl);
+
+    const raw = await invoke<string>("validate_site_ping_insecure", {
+      siteUrl,
+    });
+
+    console.log("validate_site_ping_insecure result:", raw);
+
+    const data: PingResponse = JSON.parse(raw);
+
+    if (data.code !== 0) {
+      throw {
+        type: "apiError",
+        params: {
+          message: data.msg || String(data.code),
+        },
+      } as ValidationError;
+    }
+
+    return data.data;
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    throw { type: "connectionFailed", params: { message } } as ValidationError;
-  }
+    console.error("validateSiteVersion failed:", e);
 
-  if (!response.ok) {
+    const message =
+      e instanceof Error
+        ? `${e.name}: ${e.message}\n${e.stack ?? ""}`
+        : String(e);
+
     throw {
-      type: "httpError",
-      params: { status: String(response.status) },
+      type: "connectionFailed",
+      params: { message },
     } as ValidationError;
   }
-
-  const data: PingResponse = await response.json();
-  if (data.code !== 0) {
-    throw {
-      type: "apiError",
-      params: { message: data.msg || "Unknown error" },
-    } as ValidationError;
-  }
-
-  // Remove -pro suffix if present
-  const version = data.data.replace(/-pro$/, "");
-
-  // Check if version is >= MIN_VERSION
-  if (compareSemver(version, MIN_VERSION) < 0) {
-    throw {
-      type: "versionTooLow",
-      params: { version, minVersion: MIN_VERSION },
-    } as ValidationError;
-  }
-
-  return version;
 }
 
 /**
